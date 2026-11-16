@@ -13,7 +13,12 @@ class RekamMedisSeeder extends Seeder
      */
     public function run(): void
     {
-        DB::table('hasil_pemeriksaan')->insert([
+        $pasienIds = DB::table('pasien')->pluck('id_pasien')->toArray();
+        if (empty($pasienIds)) {
+            $pasienIds = [1];
+        }
+
+        $records = [
             [
                 'id_pasien'                  => 2195,
                 'gender'                     => 1,
@@ -349,6 +354,15 @@ class RekamMedisSeeder extends Seeder
                 'yeast_pada_urine'           => '0',
                 'bakteri_pada_urine'         => '0',
             ],
-        ]);
+        ];
+
+        foreach ($records as $index => &$record) {
+            $record['id_pasien'] = $pasienIds[$index % count($pasienIds)];
+            $record['created_at'] = now();
+            $record['updated_at'] = now();
+        }
+        unset($record);
+
+        DB::table('hasil_pemeriksaan')->insert($records);
     }
 }

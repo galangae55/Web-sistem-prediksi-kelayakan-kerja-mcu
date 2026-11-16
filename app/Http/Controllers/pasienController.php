@@ -6,6 +6,7 @@ use App\Models\Pasien;
 use App\Models\Users;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Constraint\IsTrue;
 use Illuminate\Validation\Rule;
 
@@ -22,13 +23,18 @@ class PasienController extends Controller
         // Ambil data pasien dengan informasi perawat dan dokter, lalu urutkan:
         // 1. Pasien dengan jadwal pemeriksaan yang belum lewat (upcoming) muncul di atas
         // 2. Pasien yang sudah lewat muncul di bawah, keduanya diurutkan berdasarkan tanggal dan waktu pemeriksaan secara ascending
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+        $upcomingCheck = $isSqlite 
+            ? "datetime(pasien.tanggal_pemeriksaan || ' ' || pasien.waktu_pemeriksaan) >= datetime('now')" 
+            : "(pasien.tanggal_pemeriksaan || ' ' || pasien.waktu_pemeriksaan)::timestamp >= NOW()";
+
         $dataPasien = Pasien::join('users as perawat', 'pasien.id_perawat', '=', 'perawat.id_user')
             ->join('users as dokter', 'pasien.id_dokter', '=', 'dokter.id_user')
             ->select('pasien.*', 'perawat.nama as nama_perawat', 'dokter.nama as nama_dokter')
             ->orderByRaw("
                 CASE
-                    WHEN pasien.tanggal_pemeriksaan = CURRENT_DATE THEN 0  -- Jika hari ini, tetap di atas
-                    WHEN (pasien.tanggal_pemeriksaan || ' ' || pasien.waktu_pemeriksaan)::timestamp >= NOW() THEN 1
+                    WHEN pasien.tanggal_pemeriksaan = CURRENT_DATE THEN 0
+                    WHEN $upcomingCheck THEN 1
                     ELSE 2
                 END
             ")

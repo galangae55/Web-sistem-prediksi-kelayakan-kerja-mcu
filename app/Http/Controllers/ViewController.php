@@ -36,9 +36,13 @@ class ViewController extends Controller
             ->get();
 
         // Data pasien bulanan (misalnya 12 bulan terakhir)
-        // Karena kolom tanggal_pemeriksaan bertipe date, kita gunakan TO_CHAR untuk PostgreSQL
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+        $monthExpr = $isSqlite ? "strftime('%Y-%m', tanggal_pemeriksaan)" : "TO_CHAR(tanggal_pemeriksaan, 'YYYY-MM')";
+        $yearExpr = $isSqlite ? "strftime('%Y', tanggal_pemeriksaan)" : "EXTRACT(YEAR FROM tanggal_pemeriksaan)";
+        $hourExpr = $isSqlite ? "strftime('%H', waktu_pemeriksaan)" : "EXTRACT(HOUR FROM waktu_pemeriksaan)";
+
         $monthlyPatients = Pasien::select(
-                DB::raw("TO_CHAR(tanggal_pemeriksaan, 'YYYY-MM') as month"),
+                DB::raw("$monthExpr as month"),
                 DB::raw('count(*) as count')
             )
             ->whereDate('tanggal_pemeriksaan', '>=', Carbon::today()->subMonths(12))
@@ -47,9 +51,8 @@ class ViewController extends Controller
             ->get();
 
         // Data pasien tahunan (misalnya 5 tahun terakhir)
-        // Anda bisa menggunakan EXTRACT atau TO_CHAR, contohnya menggunakan EXTRACT:
         $yearlyPatients = Pasien::select(
-                DB::raw("EXTRACT(YEAR FROM tanggal_pemeriksaan) as year"),
+                DB::raw("$yearExpr as year"),
                 DB::raw('count(*) as count')
             )
             ->whereDate('tanggal_pemeriksaan', '>=', Carbon::today()->subYears(5))
@@ -59,7 +62,7 @@ class ViewController extends Controller
 
         // Data check-up hari ini (misalnya berdasarkan jam pemeriksaan)
         $todayCheckups = Pasien::select(
-                DB::raw('EXTRACT(HOUR FROM waktu_pemeriksaan) as hour'),
+                DB::raw("$hourExpr as hour"),
                 DB::raw('count(*) as count')
             )
             ->whereDate('tanggal_pemeriksaan', Carbon::today())
@@ -77,16 +80,19 @@ class ViewController extends Controller
         $pasien = session('pasien', null); // Data pasien untuk edit
         $dokterList = Users::where('role', 'dokter')->get();
 
-        // Ambil data pasien dengan informasi perawat dan dokter, lalu urutkan:
-        // 1. Pasien dengan jadwal pemeriksaan yang belum lewat (upcoming) muncul di atas
-        // 2. Pasien yang sudah lewat muncul di bawah, keduanya diurutkan berdasarkan tanggal dan waktu pemeriksaan secara ascending
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+        $upcomingCheck = $isSqlite 
+            ? "datetime(pasien.tanggal_pemeriksaan || ' ' || pasien.waktu_pemeriksaan) >= datetime('now')" 
+            : "(pasien.tanggal_pemeriksaan || ' ' || pasien.waktu_pemeriksaan)::timestamp >= NOW()";
+
+        // Ambil data pasien dengan informasi perawat dan dokter
         $dataPasien = Pasien::join('users as perawat', 'pasien.id_perawat', '=', 'perawat.id_user')
             ->join('users as dokter', 'pasien.id_dokter', '=', 'dokter.id_user')
             ->select('pasien.*', 'perawat.nama as nama_perawat', 'dokter.nama as nama_dokter')
             ->orderByRaw("
                 CASE
-                    WHEN pasien.tanggal_pemeriksaan = CURRENT_DATE THEN 0  -- Jika hari ini, tetap di atas
-                    WHEN (pasien.tanggal_pemeriksaan || ' ' || pasien.waktu_pemeriksaan)::timestamp >= NOW() THEN 1
+                    WHEN pasien.tanggal_pemeriksaan = CURRENT_DATE THEN 0
+                    WHEN $upcomingCheck THEN 1
                     ELSE 2
                 END
             ")
